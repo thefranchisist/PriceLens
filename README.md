@@ -2,6 +2,8 @@
 
 **Scan it. Price it. Shop smarter.**
 
+[**Try PriceLens live →**](https://pricelens-open-prices.the-franchis-5813.chatgpt.site)
+
 PriceLens is an open, global project for finding real supermarket prices with the camera already in your pocket. Scan a barcode, compare recent prices at nearby branches, and help the next shopper by contributing an update.
 
 ## Why PriceLens?

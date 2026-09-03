@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-geist-sans);
+  --radius-lg: var(--radius);
+}
+
+:root {
+  --background: #f7faf9;
+  --foreground: #112e2a;
+  --primary: #163f39;
+  --primary-foreground: #ffffff;
+  --secondary: #eaf6f1;
+  --secondary-foreground: #163f39;
+  --muted: #edf3f1;
+  --muted-foreground: #647773;
+  --border: #dce7e3;
+  --input: #cedbd7;
+  --ring: #6cab58;
+  --radius: 0.9rem;
+}
+
+.dark {
+  --background: #0d211d;
+  --foreground: #f2faf6;
+  --primary: #c9fb74;
+  --primary-foreground: #112e2a;
+  --secondary: #173a33;
+  --secondary-foreground: #f2faf6;
+  --muted: #17332e;
+  --muted-foreground: #aac0ba;
+  --border: #294a43;
+  --input: #31564d;
+  --ring: #c9fb74;
+}
+
+* { border-color: var(--border); }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-geist-sans), Arial, sans-serif; }
+button, a, input, select { outline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #6cab58; }
+.font-display { font-family: var(--font-geist-sans), Arial, sans-serif; }
+.hero-grid {
+  background-image: linear-gradient(rgba(22,63,57,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(22,63,57,.045) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(to bottom, black 10%, transparent 94%);
+}
+.scan-line { animation: scanning 2s ease-in-out infinite; }
+@keyframes scanning { 0%, 100% { transform: translateY(-50px); opacity: .5; } 50% { transform: translateY(50px); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .scan-line { animation: none; } * { transition-duration: 0.01ms !important; } }

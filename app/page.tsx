@@ -1,17 +1,19 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, BadgeCheck, Barcode, Camera, Check, ChevronDown, CircleDollarSign, Clock3, Code2, Globe2, LocateFixed, MapPin, Plus, Search, ShieldCheck, ShoppingBasket, Sparkles, Store, Users, X } from 'lucide-react';
+import { BrowserMultiFormatReader, type IScannerControls } from '@zxing/browser';
+import { ArrowRight, BadgeCheck, Barcode, Camera, Check, ChevronDown, CircleDollarSign, Clock3, Code2, Globe2, MapPin, Plus, Search, ShieldCheck, ShoppingBasket, Sparkles, Store, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-type Price = { store: string; branch: string; distance: string; price: string; currency: string; freshness: string; status: string; best?: boolean };
+type Product = { code: string; name: string; quantity?: string; image?: string };
+type PriceReport = { id: string; barcode: string; store: string; price: number; currency: string; createdAt: string };
 
-const prices: Price[] = [
-  { store: 'Fresh Market', branch: 'Central', distance: '0.4 km', price: '2.49', currency: '$', freshness: '18 min ago', status: 'Verified by 6 shoppers', best: true },
-  { store: 'Daily Mart', branch: 'Riverside', distance: '0.9 km', price: '2.79', currency: '$', freshness: 'Today, 10:42', status: 'Shelf photo verified' },
-  { store: 'Value Foods', branch: 'North Street', distance: '1.6 km', price: '2.95', currency: '$', freshness: 'Yesterday', status: 'Verified by 2 shoppers' },
-];
+const regionCurrencies: Record<string, string> = {
+  SA: 'SAR', AE: 'AED', GB: 'GBP', US: 'USD', CA: 'CAD', AU: 'AUD',
+  IN: 'INR', PK: 'PKR', JP: 'JPY', CN: 'CNY', CH: 'CHF',
+  DE: 'EUR', FR: 'EUR', ES: 'EUR', IT: 'EUR', NL: 'EUR', IE: 'EUR',
+};
 
 export default function Home() {
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -21,28 +23,35 @@ export default function Home() {
   const [cameraActive, setCameraActive] = useState(false);
   const [notice, setNotice] = useState('');
   const [barcode, setBarcode] = useState('');
+  const [product, setProduct] = useState<Product | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [currency, setCurrency] = useState('USD');
+  const [reports, setReports] = useState<PriceReport[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const scannerControlsRef = useRef<IScannerControls | null>(null);
+  const scanHandledRef = useRef(false);
 
   function stopCamera() {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+    scannerControlsRef.current?.stop();
+    scannerControlsRef.current = null;
     setCameraActive(false);
   }
 
   async function startCamera() {
     setCameraError('');
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError('Camera access is not supported here. Enter the barcode instead.');
-      return;
-    }
+    scanHandledRef.current = false;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      if (!videoRef.current) throw new Error('Scanner is not ready');
+      const reader = new BrowserMultiFormatReader();
+      scannerControlsRef.current = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+        if (result && !scanHandledRef.current) {
+          scanHandledRef.current = true;
+          const value = result.getText();
+          stopCamera();
+          setScannerOpen(false);
+          void lookupProduct(value);
+        }
+      });
       setCameraActive(true);
     } catch {
       setCameraError('We could not access your camera. You can enter the barcode manually.');
@@ -59,23 +68,104 @@ export default function Home() {
     setScannerOpen(false);
   }
 
+  async function scanImage(file: File) {
+    setCameraError('');
+    try {
+      const reader = new BrowserMultiFormatReader();
+      const imageUrl = URL.createObjectURL(file);
+      const result = await reader.decodeFromImageUrl(imageUrl);
+      URL.revokeObjectURL(imageUrl);
+      closeScanner();
+      await lookupProduct(result.getText());
+    } catch {
+      setCameraError('No barcode was found in that image. Try a sharper, closer photo.');
+    }
+  }
+
+  async function lookupProduct(code: string) {
+    const cleanCode = code.replace(/\D/g, '');
+    if (!cleanCode) return;
+    setLookupLoading(true);
+    setNotice('Looking up product…');
+    try {
+      const response = await fetch(`https://world.openfoodfacts.org/api/v2/product/${cleanCode}.json`);
+      const data = await response.json() as {
+        status: number;
+        product?: {
+          product_name?: string;
+          product_name_en?: string;
+          quantity?: string;
+          image_front_small_url?: string;
+          image_front_url?: string;
+        };
+      };
+      if (data.status === 1 && data.product) {
+        setProduct({
+          code: cleanCode,
+          name: data.product.product_name || data.product.product_name_en || `Product ${cleanCode}`,
+          quantity: data.product.quantity,
+          image: data.product.image_front_small_url || data.product.image_front_url,
+        });
+        setNotice('Product found. Add or view a local price below.');
+      } else {
+        setProduct({ code: cleanCode, name: 'Unknown product' });
+        setNotice('Barcode scanned. This product is not yet in the open catalogue.');
+      }
+      document.getElementById('prices')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch {
+      setProduct({ code: cleanCode, name: 'Product lookup unavailable' });
+      setNotice('Barcode scanned, but product details could not be loaded.');
+    } finally {
+      setLookupLoading(false);
+      setTimeout(() => setNotice(''), 4200);
+    }
+  }
+
   function findProduct() {
     if (!barcode.trim()) return;
     setManualOpen(false);
+    const value = barcode;
     setBarcode('');
-    setNotice('Product found — showing nearby prices.');
-    document.getElementById('prices')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(() => setNotice(''), 3200);
+    void lookupProduct(value);
   }
 
-  function submitPrice(event: React.FormEvent<HTMLFormElement>) {
+  function submitPrice(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!product) return;
+    const form = new FormData(event.currentTarget);
+    const priceValue = form.get('price');
+    const currencyValue = form.get('currency');
+    const storeValue = form.get('store');
+    if (typeof priceValue !== 'string' || typeof currencyValue !== 'string' || typeof storeValue !== 'string') return;
+    const next: PriceReport = {
+      id: crypto.randomUUID(),
+      barcode: product.code,
+      price: Number(priceValue),
+      currency: currencyValue,
+      store: storeValue,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [next, ...reports];
+    setReports(updated);
+    localStorage.setItem('pricelens-reports', JSON.stringify(updated));
     setContributeOpen(false);
-    setNotice('Thank you — your price is queued for community verification.');
+    setNotice('Price saved on this device. Community sync is the next milestone.');
     setTimeout(() => setNotice(''), 3800);
   }
 
-  useEffect(() => () => stopCamera(), []);
+  useEffect(() => {
+    const region = navigator.language.split('-')[1]?.toUpperCase();
+    if (region && regionCurrencies[region]) setCurrency(regionCurrencies[region]);
+    try {
+      const saved = JSON.parse(localStorage.getItem('pricelens-reports') || '[]');
+      if (Array.isArray(saved)) setReports(saved);
+    } catch {}
+    return () => stopCamera();
+  }, []);
+
+  const productReports = product ? reports.filter((report) => report.barcode === product.code) : [];
+  const formatMoney = (value: number, code: string) =>
+    new Intl.NumberFormat(undefined, { style: 'currency', currency: code }).format(value);
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-background text-foreground">
@@ -113,29 +203,30 @@ export default function Home() {
           </div>
 
           <div id="prices" className="relative mx-auto w-full max-w-[510px]">
-            <div className="absolute -left-9 top-14 hidden rotate-[-6deg] rounded-2xl bg-[#c9fb74] px-4 py-3 text-sm font-black text-[#163f39] shadow-lg lg:block">Save $0.46 nearby</div>
+            <div className="absolute -left-9 top-14 hidden rotate-[-6deg] rounded-2xl bg-[#c9fb74] px-4 py-3 text-sm font-black text-[#163f39] shadow-lg lg:block">{product ? 'Live product result' : 'Ready for your first scan'}</div>
             <div className="overflow-hidden rounded-[32px] border border-white/80 bg-white shadow-[0_30px_80px_rgba(26,61,54,.16)]">
               <div className="border-b border-slate-100 bg-[#f0f6f4] p-5 sm:p-6">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-white text-2xl shadow-sm" role="img" aria-label="Sparkling water">💧</div>
-                    <div className="min-w-0"><p className="truncate text-base font-extrabold text-[#112e2a]">Lime Sparkling Water</p><p className="mt-1 text-sm text-slate-500">330 ml · Barcode 5000112637922</p></div>
+                    {product?.image ? <img src={product.image} alt="" className="size-14 shrink-0 rounded-2xl bg-white object-contain shadow-sm" /> : <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-white text-[#528b33] shadow-sm"><Barcode className="size-7" /></div>}
+                    <div className="min-w-0"><p className="truncate text-base font-extrabold text-[#112e2a]">{lookupLoading ? 'Looking up product…' : product?.name || 'Scan a supermarket product'}</p><p className="mt-1 text-sm text-slate-500">{product ? [product.quantity, `Barcode ${product.code}`].filter(Boolean).join(' · ') : 'Its real product details will appear here'}</p></div>
                   </div>
-                  <span className="shrink-0 rounded-full bg-[#dff7d2] px-2.5 py-1 text-xs font-bold text-[#397328]">3 nearby</span>
+                  <span className="shrink-0 rounded-full bg-[#dff7d2] px-2.5 py-1 text-xs font-bold text-[#397328]">{productReports.length} saved</span>
                 </div>
               </div>
               <div className="p-4 sm:p-5">
-                <div className="mb-3 flex items-center justify-between px-1"><p className="text-xs font-bold uppercase tracking-[.15em] text-slate-400">Prices near you</p><button className="flex items-center gap-1 text-xs font-bold text-[#397328]"><LocateFixed className="size-3.5" /> Within 2 km</button></div>
+                <div className="mb-3 flex items-center justify-between px-1"><p className="text-xs font-bold uppercase tracking-[.15em] text-slate-400">Your price reports</p><span className="text-xs font-bold text-[#397328]">{currency}</span></div>
                 <div className="space-y-2.5">
-                  {prices.map((item) => (
-                    <div key={item.store} className={`relative grid grid-cols-[1fr_auto] items-center gap-4 rounded-2xl border p-4 transition hover:-translate-y-0.5 ${item.best ? 'border-[#a7d998] bg-[#f5fbf1]' : 'border-slate-200 bg-white'}`}>
-                      {item.best && <span className="absolute -top-2.5 left-4 rounded-full bg-[#163f39] px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-[#c9fb74]">Best price</span>}
-                      <div className={item.best ? 'pt-1' : ''}><p className="font-extrabold text-[#173e38]">{item.store} <span className="font-medium text-slate-400">· {item.distance}</span></p><p className="mt-1 text-xs text-slate-500">{item.branch} · {item.freshness}</p><p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[#528b33]"><BadgeCheck className="size-3.5" /> {item.status}</p></div>
-                      <div className="text-right"><p className="font-display text-3xl font-bold tracking-tight text-[#112e2a]"><span className="align-top text-base">{item.currency}</span>{item.price}</p><p className="text-[11px] text-slate-400">$7.55 / litre</p></div>
+                  {productReports.map((item) => (
+                    <div key={item.id} className="grid grid-cols-[1fr_auto] items-center gap-4 rounded-2xl border border-[#a7d998] bg-[#f5fbf1] p-4">
+                      <div><p className="font-extrabold text-[#173e38]">{item.store}</p><p className="mt-1 text-xs text-slate-500">{new Date(item.createdAt).toLocaleString()}</p><p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[#528b33]"><BadgeCheck className="size-3.5" /> Saved on this device</p></div>
+                      <p className="font-display text-2xl font-bold tracking-tight text-[#112e2a]">{formatMoney(item.price, item.currency)}</p>
                     </div>
                   ))}
+                  {!product && <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center"><Camera className="mx-auto size-7 text-[#528b33]" /><p className="mt-3 font-bold text-[#173e38]">No demonstration prices</p><p className="mt-1 text-sm leading-6 text-slate-500">Scan or enter a real barcode to begin.</p></div>}
+                  {product && productReports.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-8 text-center"><p className="font-bold text-[#173e38]">No prices saved for this product yet</p><p className="mt-1 text-sm leading-6 text-slate-500">Add the shelf price you can see. Global community storage is coming next.</p></div>}
                 </div>
-                <button onClick={() => setContributeOpen(true)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 py-3.5 text-sm font-bold text-slate-600 transition hover:border-[#528b33] hover:bg-[#f5fbf1] hover:text-[#397328]"><Plus className="size-4" /> Add or update a price</button>
+                <button disabled={!product} onClick={() => setContributeOpen(true)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 py-3.5 text-sm font-bold text-slate-600 transition hover:border-[#528b33] hover:bg-[#f5fbf1] hover:text-[#397328] disabled:cursor-not-allowed disabled:opacity-45"><Plus className="size-4" /> Add a price for this product</button>
               </div>
             </div>
           </div>
@@ -196,7 +287,10 @@ export default function Home() {
               {!cameraActive && <div className="absolute inset-0 grid place-items-center px-8 text-center text-white"><div><Camera className="mx-auto size-10 text-[#c9fb74]" /><p className="mt-4 text-sm text-white/70">Allow camera access to start scanning.</p>{cameraError && <p className="mt-3 text-sm font-semibold text-[#ffd6c9]">{cameraError}</p>}</div></div>}
               <div className="pointer-events-none absolute inset-x-10 top-1/2 h-32 -translate-y-1/2 rounded-2xl border-2 border-[#c9fb74] shadow-[0_0_0_999px_rgba(3,17,14,.28)]"><div className="scan-line absolute inset-x-3 top-1/2 h-px bg-[#c9fb74] shadow-[0_0_12px_#c9fb74]" /></div>
             </div>
-            <div className="p-5"><button onClick={() => { closeScanner(); setManualOpen(true); }} className="w-full text-center text-sm font-bold text-[#397328]">Camera not working? Enter barcode manually</button></div>
+            <div className="grid gap-3 p-5 sm:grid-cols-2">
+              <label className="flex h-11 cursor-pointer items-center justify-center rounded-xl border border-slate-300 text-center text-sm font-bold text-[#397328]">Scan a saved photo<input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => event.target.files?.[0] && void scanImage(event.target.files[0])} /></label>
+              <button onClick={() => { closeScanner(); setManualOpen(true); }} className="h-11 rounded-xl bg-slate-100 text-center text-sm font-bold text-[#397328]">Enter barcode manually</button>
+            </div>
           </div>
         </div>
       )}
@@ -217,9 +311,9 @@ export default function Home() {
           <form onSubmit={submitPrice} className="my-4 w-full max-w-lg rounded-[26px] bg-white p-6 shadow-2xl">
             <div className="flex justify-between"><div><h2 id="contribute-title" className="text-xl font-extrabold text-[#112e2a]">Share a price</h2><p className="mt-1 text-sm text-slate-500">Help the next shopper know before checkout.</p></div><button type="button" onClick={() => setContributeOpen(false)} aria-label="Close"><X className="size-5" /></button></div>
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
-              <label className="text-sm font-bold text-slate-700">Price<Input required inputMode="decimal" placeholder="2.49" className="mt-2 h-11" /></label>
-              <label className="text-sm font-bold text-slate-700">Currency<select className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal"><option>USD — $</option><option>EUR — €</option><option>GBP — £</option><option>SAR — ﷼</option><option>INR — ₹</option></select></label>
-              <label className="text-sm font-bold text-slate-700 sm:col-span-2">Store and branch<Input required placeholder="Store name, neighbourhood or branch" className="mt-2 h-11" /></label>
+              <label className="text-sm font-bold text-slate-700">Price<Input name="price" required min="0" step="0.01" inputMode="decimal" placeholder="0.00" className="mt-2 h-11" /></label>
+              <label className="text-sm font-bold text-slate-700">Currency<select name="currency" value={currency} onChange={(event) => setCurrency(event.target.value)} className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-white px-3 font-normal"><option value="USD">USD — $</option><option value="EUR">EUR — €</option><option value="GBP">GBP — £</option><option value="SAR">SAR — ﷼</option><option value="AED">AED</option><option value="INR">INR — ₹</option><option value="CAD">CAD</option><option value="AUD">AUD</option><option value="PKR">PKR</option><option value="JPY">JPY — ¥</option><option value="CNY">CNY — ¥</option><option value="CHF">CHF</option></select></label>
+              <label className="text-sm font-bold text-slate-700 sm:col-span-2">Store and branch<Input name="store" required placeholder="Store name, neighbourhood or branch" className="mt-2 h-11" /></label>
               <label className="text-sm font-bold text-slate-700 sm:col-span-2">Optional proof<span className="mt-2 flex h-20 items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 text-sm font-semibold text-slate-500"><Camera className="size-4" /> Add shelf-label photo</span></label>
             </div>
             <p className="mt-4 text-xs leading-5 text-slate-500">Please share only the shelf price—avoid faces, payment details, or other personal information.</p>

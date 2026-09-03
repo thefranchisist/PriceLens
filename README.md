@@ -12,19 +12,18 @@ Missing shelf labels, broken in-store scanners, unclear promotions, and unavaila
 
 ## Current prototype
 
-- Camera-first barcode scanning experience
+- Real camera and saved-photo EAN/UPC barcode decoding
 - Manual barcode entry fallback
-- Nearby branch price comparison
-- Unit-price display for fair pack-size comparisons
-- Freshness and verification signals
-- Lightweight price contribution flow
+- Live product lookup through Open Food Facts
+- Locale-aware currency selection and formatting
+- Device-local price reports
 - Responsive, keyboard-friendly interface
 
-The current public version is an interactive product prototype. The next milestone is connecting product lookup, durable community price storage, moderation, and real branch-level location data.
+The current public version scans real barcodes and retrieves real product details. Price reports are stored only on the shopper's device for now. The next milestone is durable community price storage, moderation, and real branch-level location data.
 
 ## Roadmap
 
-- [ ] Decode EAN/UPC barcodes and look up product details
+- [x] Decode EAN/UPC barcodes and look up product details
 - [ ] Store timestamped, branch-level price reports
 - [ ] Add community confirmation and evidence moderation
 - [ ] Support promotions, multi-buy terms, and expiry dates
